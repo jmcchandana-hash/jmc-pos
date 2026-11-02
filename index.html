@@ -240,7 +240,7 @@ const DEFAULTS = () => ({
   orders: [],
   orderCounter: 0,
   deleted: { products: {}, sales: {}, orders: {} },
-  device: { id: '', lastSync: null, lastBackup: null, cloud: { url: '', code: '', auth: '' }, autoMail: { url: '', token: '', every: 1, last: 0, status: '' } },
+  device: { id: '', waBot: { key: '', status: '' }, lastSync: null, lastBackup: null, cloud: { url: '', code: '', auth: '' }, autoMail: { url: '', token: '', every: 1, last: 0, status: '' } },
 });
 const KEYS = Object.keys(DEFAULTS());
 const isPlainObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -271,6 +271,7 @@ const Store = {
       catch { Toast.show('Browser storage is full. Export a backup and remove images or old sales.', 'error', { ms: 6000 }); }
     });
     if (this.onChange && keys.some((k) => ['products', 'sales', 'orders', 'deleted', 'categories', 'companySettings'].includes(k))) this.onChange();
+    if (keys.some((k) => k === 'orders' || k === 'companySettings')) { try { AutoMail.queueOrders(); } catch { /* not ready yet */ } }
   },
   saveAll() { this.save(...KEYS); },
   /** Approximate bytes used by this app in localStorage. */
@@ -1581,6 +1582,7 @@ const Reminders = {
     }
     if (p.length > this.lastNotified) { try { beep(true); } catch { /* sound is optional */ } }
     this.lastNotified = p.length;
+    setTimeout(() => WABot.auto(), 0);
   },
   start() {
     this.renderBar();
@@ -1729,6 +1731,43 @@ const BackupMail = {
 };
 
 
+/** Automatic WhatsApp reminders to the shop number.
+    A web page cannot send WhatsApp messages by itself, so the free CallMeBot service delivers them: the shop phone
+    activates it once (gets an API key). Two modes:
+    1. App mode: the app sends the message itself at the reminder time while it is open.
+    2. Server mode: the owner's Google script (the same one used for email backup) sends it at the reminder time even when the app is closed. */
+const WABot = {
+  busy: false,
+  cfg() { return S.device.waBot || (S.device.waBot = { key: '', status: '' }); },
+  hasKey() { return !!this.cfg().key; },
+  phone() { return WA.number(S.companySettings.reminderPhone || S.companySettings.phone); },
+  url(text) { return `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(`+${this.phone()}`)}&text=${encodeURIComponent(text)}&apikey=${encodeURIComponent(this.cfg().key)}`; },
+  async send(text) {
+    if (!this.hasKey()) throw new Error('Enter the CallMeBot API key first');
+    if (navigator.onLine === false) throw new Error('No internet right now');
+    await fetch(this.url(text), { mode: 'no-cors' });   // the reply is hidden from web pages: no error means it was handed over
+  },
+  mode() { return AutoMail.enabled() ? 'server' : 'app'; },
+  /** App mode: send due reminders by itself (called every minute from the reminder bar). */
+  async auto() {
+    if (this.busy || !this.hasKey() || AutoMail.enabled()) return;
+    const list = Reminders.pending();
+    if (!list.length) return;
+    this.busy = true;
+    try {
+      await this.send(Reminders.text(list));
+      const now = Date.now();
+      list.forEach((o) => { o.remindedFor = o.dueDate; o.remindedAt = now; o.updatedAt = now; });
+      Store.save('orders');
+      this.cfg().status = `Last reminder sent ${fmtDateTime(now)}`; Store.save('device');
+      Reminders.renderBar();
+      Toast.show(`WhatsApp reminder sent for ${list.length} order${list.length === 1 ? '' : 's'}`, 'success');
+      if (Router.current() === 'orders' || Router.current() === 'data') Router.refresh();
+    } catch (e) { this.cfg().status = `Will retry: ${e.message || e}`; }
+    finally { this.busy = false; }
+  },
+};
+
 /** Automatic email backup. The app posts the backup to a tiny Google Apps Script that the owner creates once
     in their own Google account; the script emails the file to the owner's Gmail. No server of ours is involved. */
 const AutoMail = {
@@ -1737,16 +1776,78 @@ const AutoMail = {
   enabled() { const c = this.cfg(); return !!(c && c.url && c.token); },
   newToken() { const a = new Uint8Array(12); crypto.getRandomValues(a); return [...a].map((b) => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join(''); },
   script() {
-    return `// JMC STUDIO POS: automatic backup to your Gmail
+    return `// JMC STUDIO POS: automatic backup to your Gmail + automatic WhatsApp order reminders
 var TOKEN = '${this.cfg().token}';
 var TO = '${String(S.companySettings.backupEmail || '').replace(/[^A-Za-z0-9@._+-]/g, '')}';   // empty = your own Gmail
+var TZ = 'Asia/Colombo';
+function out_(t) { return ContentService.createTextOutput(t); }
 function doPost(e) {
   var d = JSON.parse(e.postData.contents);
-  if (d.token !== TOKEN) return ContentService.createTextOutput('denied');
+  if (d.token !== TOKEN) return out_('denied');
+  if (d.action === 'orders') { saveOrders_(d); return out_('ok'); }
+  if (d.action === 'test') { return out_(sendWa_(d.phone, d.key, d.text)); }
   var blob = Utilities.newBlob(d.body, 'application/json', d.name);
   GmailApp.sendEmail(TO || Session.getEffectiveUser().getEmail(), d.subject, d.text, { attachments: [blob] });
-  return ContentService.createTextOutput('ok');
+  return out_('ok');
+}
+function saveOrders_(d) {
+  var p = PropertiesService.getScriptProperties();
+  var s = JSON.stringify(d), n = Math.ceil(s.length / 8000), old = Number(p.getProperty('n') || 0), i;
+  for (i = 0; i < n; i++) p.setProperty('c' + i, s.substr(i * 8000, 8000));
+  for (i = n; i < old; i++) p.deleteProperty('c' + i);
+  p.setProperty('n', String(n));
+  var has = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'dailyCheck'; });
+  if (!has) ScriptApp.newTrigger('dailyCheck').timeBased().everyMinutes(15).create();
+}
+function sendWa_(phone, key, text) {
+  var url = 'https://api.callmebot.com/whatsapp.php?phone=' + encodeURIComponent('+' + phone) + '&text=' + encodeURIComponent(text) + '&apikey=' + encodeURIComponent(key);
+  var r = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  return r.getResponseCode() === 200 ? 'ok' : 'failed ' + r.getResponseCode();
+}
+function ymd_(date, days) { var x = new Date(date + 'T12:00:00+05:30'); x.setDate(x.getDate() + days); return Utilities.formatDate(x, TZ, 'yyyy-MM-dd'); }
+function dailyCheck() {
+  var p = PropertiesService.getScriptProperties(), n = Number(p.getProperty('n') || 0), s = '', i;
+  for (i = 0; i < n; i++) s += p.getProperty('c' + i);
+  if (!s) return;
+  var c = JSON.parse(s), now = new Date();
+  var today = Utilities.formatDate(now, TZ, 'yyyy-MM-dd'), hm = Utilities.formatDate(now, TZ, 'HH:mm');
+  if (hm < c.time || !c.key) return;
+  var sent = JSON.parse(p.getProperty('sent') || '{}'), list = [], keep = {};
+  c.orders.forEach(function (o) {
+    var k = o.no + '|' + o.dueDate;
+    if (sent[k]) keep[k] = true;
+    else if (today >= ymd_(o.dueDate, -c.days)) list.push(o);
+  });
+  if (!list.length) { p.setProperty('sent', JSON.stringify(keep)); return; }
+  var lines = list.map(function (o, j) {
+    var when = o.dueDate < today ? 'OVERDUE' : o.dueDate === today ? 'TODAY' : o.dueDate === ymd_(today, 1) ? 'TOMORROW' : o.dueDate;
+    return (j + 1) + '. ' + o.no + ' - ' + (o.title || '-') + '\\n   ' + (o.customerName || '-') + (o.phone ? ' (' + o.phone + ')' : '') + ' - ' + when + ' - Balance ' + o.balance + ' - ' + o.status;
+  });
+  var text = c.shop + ' - Order reminder\\n' + list.length + ' order(s) to deliver:\\n\\n' + lines.join('\\n');
+  if (sendWa_(c.phone, c.key, text) === 'ok') {
+    list.forEach(function (o) { keep[o.no + '|' + o.dueDate] = true; });
+    p.setProperty('sent', JSON.stringify(keep));
+  }
 }`;
+  },
+  /** Server mode: give the Google script the open orders + reminder settings, so it can send the WhatsApp reminder on its own. */
+  queueOrders: debounce(() => { if (AutoMail.enabled() && WABot.hasKey()) AutoMail.sendOrders().catch(() => {}); }, 4000),
+  async sendOrders(test = false) {
+    const c = this.cfg();
+    const co = S.companySettings;
+    const base = { token: c.token, phone: WABot.phone(), key: WABot.cfg().key };
+    let payload;
+    if (test) payload = { ...base, action: 'test', text: `${co.name}: test reminder. Automatic WhatsApp reminders are working.` };
+    else payload = { ...base, action: 'orders', shop: co.name, days: Math.max(0, Math.floor(num(co.remindDays))), time: /^\d\d:\d\d$/.test(co.remindTime || '') ? co.remindTime : '08:00',
+      orders: S.orders.filter((o) => isOpenOrder(o) && o.dueDate).map((o) => ({ no: o.no, title: o.title, customerName: o.customerName, phone: o.phone, dueDate: o.dueDate, status: o.status, balance: Orders.balance(o) })) };
+    try {
+      const r = await fetch(c.url, { method: 'POST', body: JSON.stringify(payload) });
+      const t = (await r.text()).trim();
+      if (t !== 'ok') throw new Error(t === 'denied' ? 'The script did not accept the token' : `The script replied: ${t.slice(0, 60)}`);
+    } catch (e) {
+      if (e instanceof TypeError) { await fetch(c.url, { method: 'POST', body: JSON.stringify(payload), mode: 'no-cors' }); } else throw e;
+    }
+    WABot.cfg().status = test ? 'Test sent' : `Orders sent to your Google script ${fmtDateTime(Date.now())}`; Store.save('device');
   },
   due() {
     const c = this.cfg();
@@ -2914,8 +3015,20 @@ Forms.automail = async (form) => {
   const url = String(new FormData(form).get('url') || '').trim();
   if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url) && !/^http:\/\/localhost/.test(url)) return Toast.show('Paste the Web app URL (it starts with https://script.google.com/)', 'error');
   AutoMail.cfg().url = url; AutoMail.cfg().last = 0; AutoMail.cfg().status = ''; Store.save('device');
-  try { await AutoMail.send(true); Toast.show('Backup sent. Check your Gmail', 'success'); }
+  try { await AutoMail.send(true); Toast.show('Backup sent. Check your Gmail', 'success'); if (WABot.hasKey()) AutoMail.queueOrders(); }
   catch (e) { Toast.show(e.message, 'error', { ms: 6000 }); }
+  Router.refresh();
+};
+
+Forms.wabot = async (form) => {
+  const key = String(new FormData(form).get('key') || '').trim().replace(/[^A-Za-z0-9]/g, '');
+  if (!key) return Toast.show('Paste the API key CallMeBot sent you', 'error');
+  WABot.cfg().key = key; WABot.cfg().status = ''; Store.save('device');
+  try {
+    if (AutoMail.enabled()) { await AutoMail.sendOrders(true); await AutoMail.sendOrders(); }
+    else await WABot.send(`${S.companySettings.name}: test reminder. Automatic WhatsApp reminders are working.`);
+    Toast.show('Test sent. Check WhatsApp on the shop phone (can take a minute)', 'success', { ms: 6000 });
+  } catch (e) { Toast.show(e.message, 'error', { ms: 6000 }); }
   Router.refresh();
 };
 
@@ -2983,6 +3096,22 @@ Views.data = () => {
           <button type="button" data-action="backup-gmail" class="${C.btnGhost}">Open Gmail</button>
         </div>
         <p class="text-xs ${C.muted}">${S.device.lastBackup ? `Last backup: ${fmtDateTime(S.device.lastBackup)}.` : 'No backup yet.'} A reminder appears every ${num(S.companySettings.backupEvery) || 'N'} days (change it in Settings). Silent automatic emailing is not possible from a single offline file, but the online sync above also keeps a live copy of everything.</p>
+      </section>
+      <section class="${C.card} space-y-3 md:col-span-2"><h2 class="${C.h2} flex items-center gap-2">${icon('chat', 'h-5 w-5 text-emerald-600 dark:text-emerald-300')} Automatic WhatsApp reminders</h2>
+        <p class="text-sm ${C.muted}">Order reminders are sent to the shop number <b>${esc(S.companySettings.reminderPhone || S.companySettings.phone)}</b> by themselves at <b>${esc(S.companySettings.remindTime || '08:00')}</b>, ${num(S.companySettings.remindDays) === 0 ? 'on the due day' : `${num(S.companySettings.remindDays)} day(s) before the due day`}. Change the time and days in Settings.</p>
+        ${WABot.hasKey() ? `<div class="flex flex-wrap items-center gap-2"><span class="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-300">On</span>
+          <span class="text-xs ${C.muted}">${AutoMail.enabled() ? 'Works even when the app is closed (Google script)' : 'Works while the app is open. Add the Google script below to also send when the app is closed.'}${WABot.cfg().status ? ` · ${esc(WABot.cfg().status)}` : ''}</span></div>
+          <div class="flex flex-wrap gap-2"><button type="button" data-action="wa-test" class="${C.btn}">${icon('chat', 'h-4 w-4')} Send a test message</button><button type="button" data-action="wa-off" class="${C.btnGhost}">${icon('x', 'h-4 w-4')} Turn off</button></div>`
+        : `<form data-form="wabot" class="space-y-3" novalidate>
+          <ol class="list-decimal space-y-1.5 pl-5 text-xs leading-relaxed ${C.muted}">
+            <li>On the shop phone (${esc(S.companySettings.reminderPhone || S.companySettings.phone)}) open the free CallMeBot page <b>callmebot.com/blog/free-api-whatsapp-messages</b> and save the bot's WhatsApp number it shows in the phone contacts.</li>
+            <li>Send this exact message to that contact in WhatsApp: <b>I allow callmebot to send me messages</b></li>
+            <li>Within about 2 minutes it replies with your API key. Paste the key here.</li>
+          </ol>
+          ${field('CallMeBot API key', `<input name="key" class="${C.input}" inputmode="numeric" autocomplete="off" placeholder="e.g. 123456">`)}
+          <button type="submit" class="${C.btn}">${icon('check', 'h-4 w-4')} Turn on and send a test</button>
+        </form>`}
+        <p class="text-xs ${C.muted}">The message goes through the free CallMeBot service, so the order details pass through it. To have it work with the app closed, turn on the automatic email backup below: the same Google script then sends the reminders.</p>
       </section>
       <section class="${C.card} space-y-3 md:col-span-2"><h2 class="${C.h2} flex items-center gap-2">${icon('mail', 'h-5 w-5 text-primary-600 dark:text-primary-300')} Automatic email backup</h2>
         <p class="text-sm ${C.muted}">The app emails the full backup to your Gmail by itself, as long as it is opened now and then and there is internet. One-time setup with a free Google script (5 minutes).</p>
@@ -3539,6 +3668,8 @@ const Actions = {
   'set-lang': (el) => I18N.setLang(el.dataset.lang),
   'am-copy': async () => Toast.show((await WA.copy(AutoMail.script())) ? 'Code copied' : 'Could not copy. Select the code and copy it', 'info'),
   'am-test': async () => { try { await AutoMail.send(true); Toast.show('Backup sent. Check your Gmail', 'success'); } catch (e) { Toast.show(e.message, 'error', { ms: 6000 }); } },
+  'wa-test': async () => { try { if (AutoMail.enabled()) { await AutoMail.sendOrders(true); await AutoMail.sendOrders(); } else await WABot.send(`${S.companySettings.name}: test reminder. Automatic WhatsApp reminders are working.`); Toast.show('Test sent. Check WhatsApp', 'success'); } catch (e) { Toast.show(e.message, 'error', { ms: 6000 }); } Router.refresh(); },
+  'wa-off': () => { WABot.cfg().key = ''; WABot.cfg().status = ''; Store.save('device'); Router.refresh(); },
   'am-off': () => { AutoMail.cfg().url = ''; AutoMail.cfg().status = ''; Store.save('device'); Router.refresh(); },
   'glass-reset': () => { Theme.set({ glass: 30, blur: 24 }); Router.refresh(); },
 
