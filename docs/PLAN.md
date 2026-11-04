@@ -50,6 +50,14 @@ Firebase Auth (email/password) + Cloud Firestore (offline persistence) + Cloud S
 - Reminder channels: WhatsApp and Telegram (separate feature).
 - Draft rules and config files: `firebase/database.rules.json`, `firebase/firestore.rules`, `.gitignore`, `.env.example`.
 
+## 4b. Security hardening done in the app (v12)
+- **Content Security Policy** (meta tag): no external scripts, connections only to Telegram, CallMeBot, Google Apps Script and Firebase; no plugins, no base tag changes, no form posts.
+- **Untrusted data is cleaned** before use (sync files, cloud, backups, imports): prototype-pollution keys removed, records with unsafe ids dropped, images must be real image data URLs, oversized strings cut.
+- **Backups and exports no longer contain secrets**: this device's connection settings (sync secret, script token, PIN) and the bot/WhatsApp keys are left out; restoring a backup keeps the device's own values.
+- **Optional PIN lock** per device: PBKDF2-SHA256 (150,000 rounds, random salt), 4 to 12 digits, weak PINs refused, 30 s lockout doubling up to 15 min after 5 wrong tries, auto-lock after inactivity, app inert while locked. It is a screen lock, not disk encryption.
+- Referrer is not sent; external links open with `noopener`; debug handle `window.__pos` only when `localStorage.debug = 1`.
+- Still true: Online sync has no accounts. Anyone with the link code can read the shop data. The Telegram token and WhatsApp key are in the shared sync data by design (set once, every device gets it). Real fixes (accounts, per-user rules) need the Firebase project in section 3.
+
 ## 5. What is NOT implemented (and what it needs)
 Everything in section 3. Needs from the owner: a Firebase project (Blaze plan for Functions and scheduled backups), Auth enabled, a Storage bucket, a deploy token or service account stored as a GitHub Actions secret, and an agreement to move to a bundled frontend.
 
