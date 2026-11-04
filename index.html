@@ -1896,7 +1896,9 @@ function sendWa_(phone, key, text) {
 }
 function sendTg_(token, chat, text) {
   var r = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', { method: 'post', payload: { chat_id: String(chat), text: text }, muteHttpExceptions: true });
-  return r.getResponseCode() === 200 ? 'ok' : 'failed ' + r.getResponseCode();
+  if (r.getResponseCode() === 200) return 'ok';
+  var why = ''; try { why = JSON.parse(r.getContentText()).description || ''; } catch (e) {}
+  return 'Telegram ' + r.getResponseCode() + ' ' + why;
 }
 function notify_(c, text) {
   var res = [];
@@ -1943,7 +1945,7 @@ function dailyCheck() {
     try {
       const r = await fetch(c.url, { method: 'POST', body: JSON.stringify(payload) });
       const t = (await r.text()).trim();
-      if (t !== 'ok') throw new Error(t === 'denied' ? 'The script did not accept the token' : `The script replied: ${t.slice(0, 60)}`);
+      if (t !== 'ok') throw new Error(t === 'denied' ? 'The script did not accept the token' : `The script replied: ${t.slice(0, 160)}`);
     } catch (e) {
       if (e instanceof TypeError) { await fetch(c.url, { method: 'POST', body: JSON.stringify(payload), mode: 'no-cors' }); } else throw e;
     }
@@ -3157,8 +3159,8 @@ Forms.tg = async (form) => {
     let name = chat;
     if (!chat) { const r = await TG.findChat(token); chat = r.id; name = r.name; }
     c.token = token; c.chat = chat; c.chatName = name; c.status = ''; Store.save('device');
+    await TG.send(`${S.companySettings.name}: test reminder. Automatic reminders are working.`);   // direct from the app first: shows Telegram's exact error
     if (AutoMail.enabled()) { await AutoMail.sendOrders(true); await AutoMail.sendOrders(); }
-    else await TG.send(`${S.companySettings.name}: test reminder. Automatic reminders are working.`);
     Toast.show(`Test sent to Telegram (${name})`, 'success', { ms: 5000 });
   } catch (e) { Toast.show(e.message, 'error', { ms: 7000 }); }
   Router.refresh();
@@ -3823,7 +3825,7 @@ const Actions = {
   'am-copy': async () => Toast.show((await WA.copy(AutoMail.script())) ? 'Code copied' : 'Could not copy. Select the code and copy it', 'info'),
   'am-test': async () => { try { await AutoMail.send(true); Toast.show('Backup sent. Check your Gmail', 'success'); } catch (e) { Toast.show(e.message, 'error', { ms: 6000 }); } },
   'wa-test': async () => { try { if (AutoMail.enabled()) { await AutoMail.sendOrders(true); await AutoMail.sendOrders(); } else await WABot.send(`${S.companySettings.name}: test reminder. Automatic WhatsApp reminders are working.`); Toast.show('Test sent. Check WhatsApp', 'success'); } catch (e) { Toast.show(e.message, 'error', { ms: 6000 }); } Router.refresh(); },
-  'tg-test': async () => { try { if (AutoMail.enabled()) { await AutoMail.sendOrders(true); await AutoMail.sendOrders(); } else await TG.send(`${S.companySettings.name}: test reminder. Automatic reminders are working.`); Toast.show('Test sent. Check Telegram', 'success'); } catch (e) { Toast.show(e.message, 'error', { ms: 6000 }); } Router.refresh(); },
+  'tg-test': async () => { try { await TG.send(`${S.companySettings.name}: test reminder. Automatic reminders are working.`); if (AutoMail.enabled()) { await AutoMail.sendOrders(true); await AutoMail.sendOrders(); } Toast.show('Test sent. Check Telegram', 'success'); } catch (e) { Toast.show(e.message, 'error', { ms: 6000 }); } Router.refresh(); },
   'tg-off': () => { Object.assign(TG.cfg(), { token: '', chat: '', chatName: '', status: '' }); Store.save('device'); Router.refresh(); },
   'wa-off': () => { WABot.cfg().key = ''; WABot.cfg().status = ''; Store.save('device'); Router.refresh(); },
   'am-off': () => { AutoMail.cfg().url = ''; AutoMail.cfg().status = ''; Store.save('device'); Router.refresh(); },
