@@ -1,0 +1,20 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "shops": {
+      "$shop": {
+        ".read": "auth != null && root.child('members').child($shop).child(auth.uid).exists()",
+        "meta": { "$device": { ".write": "auth != null && root.child('members').child($shop).child(auth.uid).exists()", ".validate": "newData.hasChildren(['at'])" } },
+        "devices": { "$device": { ".write": "auth != null && root.child('members').child($shop).child(auth.uid).exists()" } },
+        "photos": { "$id": { ".write": "auth != null && root.child('members').child($shop).child(auth.uid).exists()", ".validate": "newData.isString() && newData.val().length < 700000" } }
+      }
+    },
+    "members": {
+      "$shop": {
+        ".read": "auth != null && data.child(auth.uid).exists()",
+        "$uid": { ".write": "auth != null && root.child('members').child($shop).child(auth.uid).child('role').val() === 'owner' && auth.uid !== $uid" }
+      }
+    }
+  }
+}

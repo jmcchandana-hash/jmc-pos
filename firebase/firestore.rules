@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function member(shop) { return signedIn() && exists(/databases/$(database)/documents/shops/$(shop)/members/$(request.auth.uid)); }
+    function role(shop) { return get(/databases/$(database)/documents/shops/$(shop)/members/$(request.auth.uid)).data.role; }
+    function admin(shop) { return member(shop) && role(shop) in ['owner', 'admin']; }
+    function immutableKeep() { return request.resource.data.id == resource.data.id && request.resource.data.shopId == resource.data.shopId && request.resource.data.createdAt == resource.data.createdAt && request.resource.data.createdBy == resource.data.createdBy; }
+
+    match /{document=**} { allow read, write: if false; }   // deny by default
+
+    match /shops/{shop} {
+      allow read: if member(shop);
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if admin(shop) && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if member(shop);
+        allow create, update: if admin(shop) && uid != request.auth.uid && request.resource.data.role in ['admin', 'cashier'];   // owners are created by a Cloud Function only
+        allow delete: if admin(shop) && uid != request.auth.uid;
+      }
+      match /devices/{id} { allow read: if member(shop); allow create, update: if member(shop) && request.resource.data.uid == request.auth.uid; allow delete: if admin(shop); }
+
+      match /products/{id} { allow read: if member(shop);
+        allow create: if member(shop) && request.resource.data.shopId == shop && request.resource.data.version == 1;
+        allow update: if member(shop) && immutableKeep() && request.resource.data.version == resource.data.version + 1;
+        allow delete: if false; }                                   // soft delete with deletedAt
+
+      // Financial records are append-only. Corrections are new adjustment/refund documents.
+      match /sales/{id} { allow read: if member(shop); allow create: if member(shop) && request.resource.data.shopId == shop; allow update, delete: if false; }
+      match /payments/{id} { allow read: if member(shop); allow create: if member(shop) && request.resource.data.shopId == shop; allow update, delete: if false; }
+      match /stockMovements/{id} { allow read: if member(shop); allow create: if member(shop); allow update, delete: if false; }
+      match /orders/{id} { allow read: if member(shop); allow create: if member(shop); allow update: if member(shop) && immutableKeep() && request.resource.data.version == resource.data.version + 1; allow delete: if false; }
+      match /customers/{id} { allow read: if member(shop); allow create, update: if member(shop); allow delete: if false; }
+      match /settings/{id} { allow read: if member(shop); allow write: if admin(shop); }
+      match /auditLogs/{id} { allow read: if admin(shop); allow create: if member(shop); allow update, delete: if false; }
+      match /backups/{id} { allow read: if admin(shop); allow write: if false; }          // written by Cloud Functions only
+      match /syncOperations/{id} { allow read: if member(shop); allow create: if member(shop) && request.resource.data.userId == request.auth.uid; allow update, delete: if false; }
+    }
+  }
+}
