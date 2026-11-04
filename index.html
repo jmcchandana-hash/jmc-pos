@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="si" data-color="blue">
+<html lang="si" data-color="royal">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -285,7 +285,7 @@ const DEFAULTS = () => ({
   invoices: [],
   invoiceCounter: 0,
   reports: { updatedAt: null, byDay: {} },
-  theme: { mode: 'system', color: 'blue', glass: 30, blur: 24, gv: 2 },
+  theme: { mode: 'system', color: 'royal', glass: 30, blur: 24, gv: 2 },
   cart: { items: [], discType: 'amount', discValue: 0, cash: '', method: 'Cash', advance: '', customer: { name: '', phone: '' } },
   orders: [],
   orderCounter: 0,
@@ -369,7 +369,7 @@ const Theme = {
     const dark = mode === 'dark' || (mode === 'system' && mq.matches);
     document.documentElement.classList.toggle('dark', dark);
     const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', dark ? '#020617' : '#bae6fd');
-    document.documentElement.setAttribute('data-color', COLORS.some((c) => c.id === color) ? color : 'blue');
+    document.documentElement.setAttribute('data-color', COLORS.some((c) => c.id === color) ? color : 'royal');
   },
   set(patch) { Object.assign(S.theme, patch); Store.save('theme'); this.apply(); },
 };
