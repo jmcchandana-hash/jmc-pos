@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>JMC STUDIO POS</title>
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#007AFF">
+<meta name="theme-color" content="#bae6fd">
+<meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="JMC POS">
@@ -22,6 +23,7 @@
     if (localStorage.getItem('lang') === 'si') document.documentElement.lang = 'si';
     var dark = t.mode === 'dark' || ((!t.mode || t.mode === 'system') && window.matchMedia('(prefers-color-scheme: dark)').matches);
     if (dark) document.documentElement.classList.add('dark');
+    var tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', dark ? '#020617' : '#bae6fd');
     if (t.color) document.documentElement.setAttribute('data-color', t.color);
     if (t.gv === 2) { var st = document.createElement('style'); st.id = 'glass-vars'; st.textContent = ':root{--g-a:' + t.glass + '%;--g-ad:' + Math.round(t.glass * 0.27) + '%;--g-blur:' + t.blur + 'px;--nav-icon:' + (t.navIcon || 22) + 'px;--nav-text:' + (t.navText || 10) + 'px;--nav-pad:' + (t.navPad === undefined ? 6 : t.navPad) + 'px;}'; document.head.appendChild(st); }
   } catch (e) {}
@@ -317,6 +319,7 @@ const Theme = {
     st.textContent = `:root{--g-a:${g}%;--g-ad:${Math.round(g * 0.27)}%;--g-blur:${bl}px;--nav-icon:${cl(S.theme.navIcon, 16, 32, 22)}px;--nav-text:${cl(S.theme.navText, 8, 15, 10)}px;--nav-pad:${cl(S.theme.navPad, 0, 16, 6)}px;}`;
     const dark = mode === 'dark' || (mode === 'system' && mq.matches);
     document.documentElement.classList.toggle('dark', dark);
+    const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', dark ? '#020617' : '#bae6fd');
     document.documentElement.setAttribute('data-color', COLORS.some((c) => c.id === color) ? color : 'blue');
   },
   set(patch) { Object.assign(S.theme, patch); Store.save('theme'); this.apply(); },
