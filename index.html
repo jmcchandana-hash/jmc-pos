@@ -81,7 +81,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ESC_MAP[c]);
-const APP_VERSION = 'v19';   // keep in step with VERSION in sw.js
+const APP_VERSION = 'v20';   // keep in step with VERSION in sw.js
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 /** Everything that comes from outside this device (sync files, cloud, backups, imports) is untrusted: it is cleaned before it is used. */
 const Clean = {
@@ -3083,12 +3083,12 @@ Views.settings = () => {
   </div>`;
 };
 
-Forms.settings = (form) => {
+Forms.settings = (form, silent) => {
   const f = Object.fromEntries(new FormData(form));
   const name = String(f.name || '').trim();
-  if (!name) return Toast.show('Company name is required', 'error');
+  if (!name) return silent ? false : Toast.show('Company name is required', 'error');
   const rate = num(f.taxRate);
-  if (rate < 0 || rate > 100) return Toast.show('Tax must be between 0 and 100', 'error');
+  if (rate < 0 || rate > 100) return silent ? false : Toast.show('Tax must be between 0 and 100', 'error');
   Object.assign(S.companySettings, {
     name, address: String(f.address || '').trim(), phone: String(f.phone || '').trim(), logo: f.logo || '',
     currency: String(f.currency || '').trim() || 'Rs.', taxName: String(f.taxName || '').trim() || 'Tax', taxRate: rate,
@@ -3103,9 +3103,17 @@ Forms.settings = (form) => {
   S.invoiceCounter = Math.max(0, Math.floor(num(f.invoiceCounter)));
   Object.assign(S.device, { printMode: ['ask', 'bill', 'invoice', 'both', 'none'].includes(f.printMode) ? f.printMode : 'ask', invoicePaper: f.invoicePaper === 'A6' ? 'A6' : 'A4', printSign: f.printSign === '1', printMiddle: f.printMiddle !== '0' });
   Store.save('companySettings', 'invoiceCounter', 'device');
+  if (silent) { Toast.show('Saved', 'success', { ms: 1000 }); return true; }
   Shell.render();
   Router.refresh();
   Toast.show('Settings saved', 'success');
+};
+/** Settings save themselves a moment after any change, so nothing is lost if "Save settings" is not pressed. */
+const SettingsAuto = {
+  t: 0, dirty: false,
+  form() { return document.querySelector('form[data-form="settings"]'); },
+  queue(ms = 500) { this.dirty = true; clearTimeout(this.t); this.t = setTimeout(() => this.now(), ms); },
+  now(force) { clearTimeout(this.t); if (!this.dirty && !force) return; const f = this.form(); if (f && Forms.settings(f, true)) this.dirty = false; },
 };
 
 /* =====================================================================
@@ -3884,7 +3892,7 @@ const Actions = {
   },
 
   /* settings */
-  'logo-clear': () => { $('[data-form=settings]').elements.logo.value = ''; $('#logo-preview').innerHTML = icon('photo', 'h-8 w-8'); },
+  'logo-clear': () => { $('[data-form=settings]').elements.logo.value = ''; $('#logo-preview').innerHTML = icon('photo', 'h-8 w-8'); SettingsAuto.now(true); },
 
   /* import / export / sync */
   'export-products': () => { downloadJSON(`products-${Backup.stamp()}.json`, { app: APP_ID, exportedAt: new Date().toISOString(), categories: S.categories, products: S.products }); Toast.show('Products exported', 'success'); },
@@ -4029,7 +4037,7 @@ const Changes = {
     try {
       const url = await imageToDataURL(file, 320, 'image/png');
       $('[data-form=settings]').elements.logo.value = url;
-      $('#logo-preview').innerHTML = `<img src="${url}" alt="" class="h-full w-full object-contain">`;
+      $('#logo-preview').innerHTML = `<img src="${url}" alt="" class="h-full w-full object-contain">`; SettingsAuto.now(true);
     } catch (e) { Toast.show(e.message, 'error'); }
     el.value = '';
   },
@@ -4066,6 +4074,10 @@ const wireEvents = () => {
     const el = e.target.closest('[data-action]');
     if (el && Actions[el.dataset.action]) Actions[el.dataset.action](el, e);
   });
+  document.addEventListener('input', (e) => { if (e.target.closest('form[data-form="settings"]')) SettingsAuto.queue(900); });
+  document.addEventListener('change', (e) => { if (e.target.closest('form[data-form="settings"]')) SettingsAuto.queue(150); });
+  window.addEventListener('pagehide', () => SettingsAuto.now());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) SettingsAuto.now(); });
   document.addEventListener('input', (e) => { const el = e.target.closest('[data-input]'); if (el) Inputs[el.dataset.input]?.(el, e); });
   document.addEventListener('change', (e) => { const el = e.target.closest('[data-change]'); if (el) Changes[el.dataset.change]?.(el, e); });
   document.addEventListener('keydown', (e) => { const el = e.target.closest?.('[data-keydown]'); if (el) Keydowns[el.dataset.keydown]?.(el, e); });
@@ -4090,7 +4102,7 @@ const wireEvents = () => {
     if (e.key === '?' && !typing) Actions.shortcuts();
   });
 
-  window.addEventListener('hashchange', Router.render);
+  window.addEventListener('hashchange', () => { SettingsAuto.now(); Router.render(); });
   window.addEventListener('storage', (e) => { if (!e.key || KEYS.includes(e.key)) App.reloadFromStorage(); });
   /* Print with a light palette even if dark mode is on */
   window.addEventListener('beforeprint', () => document.documentElement.classList.remove('dark'));
