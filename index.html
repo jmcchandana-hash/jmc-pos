@@ -25,6 +25,7 @@
     if (localStorage.getItem('lang') === 'si') document.documentElement.lang = 'si';
     var dark = t.mode === 'dark' || ((!t.mode || t.mode === 'system') && window.matchMedia('(prefers-color-scheme: dark)').matches);
     if (dark) document.documentElement.classList.add('dark');
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
     var tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', dark ? '#020617' : '#bae6fd');
     if (t.color) document.documentElement.setAttribute('data-color', t.color);
     if (t.gv === 2) { var st = document.createElement('style'); st.id = 'glass-vars'; st.textContent = ':root{--g-a:' + t.glass + '%;--g-ad:' + Math.round(t.glass * 0.27) + '%;--g-blur:' + t.blur + 'px;--nav-icon:' + (t.navIcon || 25) + 'px;--nav-text:' + (t.navText || 10) + 'px;--nav-pad:' + (t.navPad === undefined ? 6 : t.navPad) + 'px;}'; document.head.appendChild(st); }
@@ -81,7 +82,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ESC_MAP[c]);
-const APP_VERSION = 'v23';   // keep in step with VERSION in sw.js
+const APP_VERSION = 'v24';   // keep in step with VERSION in sw.js
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 /** Everything that comes from outside this device (sync files, cloud, backups, imports) is untrusted: it is cleaned before it is used. */
 const Clean = {
@@ -371,6 +372,7 @@ const Theme = {
     st.textContent = `:root{--g-a:${g}%;--g-ad:${Math.round(g * 0.27)}%;--g-blur:${bl}px;--nav-icon:${cl(S.theme.navIcon, 16, 32, 25)}px;--nav-text:${cl(S.theme.navText, 8, 15, 10)}px;--nav-pad:${cl(S.theme.navPad, 0, 16, 6)}px;}`;
     const dark = mode === 'dark' || (mode === 'system' && mq.matches);
     document.documentElement.classList.toggle('dark', dark);
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light'; // dark drop-down lists, date pickers and scrollbars
     const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', dark ? '#020617' : '#bae6fd');
     document.documentElement.setAttribute('data-color', COLORS.some((c) => c.id === color) ? color : 'royal');
   },

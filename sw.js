@@ -1,5 +1,5 @@
 // Bump VERSION on every release so installed apps notice the update.
-const VERSION = 'jmc-pos-v23';
+const VERSION = 'jmc-pos-v24';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES))); });
 self.addEventListener('activate', (e) => {
