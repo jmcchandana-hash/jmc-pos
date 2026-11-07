@@ -110,7 +110,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ESC_MAP[c]);
-const APP_VERSION = 'v34';   // keep in step with VERSION in sw.js
+const APP_VERSION = 'v35';   // keep in step with VERSION in sw.js
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 /** Everything that comes from outside this device (sync files, cloud, backups, imports) is untrusted: it is cleaned before it is used. */
 const Clean = {
@@ -4340,9 +4340,11 @@ const init = () => {
   Reminders.start();
   AutoMail.start();
   I18N.start();
+  // The opening screen stays for about 1.6 s from the start (an installed app loads so fast that it would otherwise flash by unseen). Tap it to skip.
   const splash = $('#splash');
-  splash.classList.add('opacity-0', 'pointer-events-none');
-  setTimeout(() => splash.remove(), 350);
+  const hideSplash = () => { if (!splash.isConnected) return; splash.classList.add('opacity-0', 'pointer-events-none'); setTimeout(() => splash.remove(), 350); };
+  splash.addEventListener('pointerdown', hideSplash, { once: true });
+  setTimeout(hideSplash, localStorage.getItem('debug') === '1' ? 0 : Math.max(0, 1600 - performance.now()));
   if (localStorage.getItem('debug') === '1') window.__pos = { AutoMail, S, Orders, Photos, Reminders, CloudSync, BackupMail, Backup, Sync, FolderSync, Cart, Sales, Products, Inventory, WA, exportSalesXlsx, Analytics };   // handy for support / debugging
 };
 
