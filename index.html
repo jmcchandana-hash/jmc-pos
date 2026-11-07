@@ -102,7 +102,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ESC_MAP[c]);
-const APP_VERSION = 'v31';   // keep in step with VERSION in sw.js
+const APP_VERSION = 'v32';   // keep in step with VERSION in sw.js
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 /** Everything that comes from outside this device (sync files, cloud, backups, imports) is untrusted: it is cleaned before it is used. */
 const Clean = {
